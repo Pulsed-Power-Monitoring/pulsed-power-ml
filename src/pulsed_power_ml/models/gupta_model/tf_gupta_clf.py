@@ -33,6 +33,7 @@ class TFGuptaClassifier(keras.Model):
                  training_data_features: tf.Tensor = tf.constant(1, dtype=tf.float32),
                  training_data_labels: tf.Tensor = tf.constant(1, dtype=tf.float32),
                  verbose: tf.Tensor = tf.constant(False, dtype=tf.bool),
+                 apparent_power_threshold: tf.Tensor = tf.constant(0, dtype=tf.float32),
                  name="TFGuptaClassifier",
                  **kwargs
                  ) -> None:
@@ -75,6 +76,8 @@ class TFGuptaClassifier(keras.Model):
             Corresponding labels for the provided training data
         verbose
             If True, increase verbosity.
+        apparent_power_threshold
+            Allowed apparent power range ratio of physical boundary condition. If 0, disable physical boundary condition feature
         """
         super(TFGuptaClassifier, self).__init__(name=name, **kwargs)
 
@@ -89,7 +92,7 @@ class TFGuptaClassifier(keras.Model):
         self.n_peaks_max = tf.constant(N_PEAKS_MAX,
                                        dtype=tf.int32)
         self.switch_threshold = switch_threshold
-
+        self.apparent_power_threshold = apparent_power_threshold
         # kNN-Classifier
         self.n_neighbors = n_neighbors
         self.distance_threshold = distance_threshold
@@ -373,7 +376,20 @@ class TFGuptaClassifier(keras.Model):
         return spectrum, apparent_power
         
     def check_physical_condition_switch_on(self, appliance_index, current_apparent_power):
-        
+        """
+        Check if switch-on event of known appliance satisfies the physical boundary conditions.
+
+        Parameters
+        ----------
+        appliance_index
+            Index of known appliance
+        current_apparent_power
+            Current, total value of apparent power            
+
+        Returns
+        -------
+        True of False
+        """        
         if appliance_index < 0 or appliance_index >= self.n_known_appliances:
             return False
             
@@ -386,7 +402,7 @@ class TFGuptaClassifier(keras.Model):
         power_difference = tf.math.subtract(current_apparent_power, previous_apparent_power)
         # Check if the power difference is in allowed range
         appliance_power =  self.apparent_power_list[appliance_index]
-        power_threshold = appliance_power * 0.1             
+        power_threshold = appliance_power * self.apparent_power_threshold            
         if tf.math.logical_or(tf.math.greater(power_difference, tf.math.add(appliance_power, power_threshold)),
                          tf.math.less(power_difference, tf.math.subtract(appliance_power, power_threshold))):
             tf.print("Power difference out of range")             
@@ -395,7 +411,20 @@ class TFGuptaClassifier(keras.Model):
             return True
 
     def check_physical_condition_switch_off(self, appliance_index, current_apparent_power):
-        
+        """
+        Check if switch-off event of known appliance satisfies the physical boundary conditions.
+
+        Parameters
+        ----------
+        appliance_index
+            Index of known appliance
+        current_apparent_power
+            Current, total value of apparent power            
+
+        Returns
+        -------
+        True of False
+        """          
         if appliance_index < 0 or appliance_index >= self.n_known_appliances:
             return False
             
@@ -408,7 +437,7 @@ class TFGuptaClassifier(keras.Model):
         power_difference = tf.math.subtract(previous_apparent_power, current_apparent_power)
         # Check if the power difference is in allowed range
         appliance_power =  self.apparent_power_list[appliance_index]
-        power_threshold = appliance_power * 0.1             
+        power_threshold = appliance_power * self.apparent_power_threshold              
         if tf.math.logical_or(tf.math.greater(power_difference, tf.math.add(appliance_power, power_threshold)),
                          tf.math.less(power_difference, tf.math.subtract(appliance_power, power_threshold))):
             tf.print("Power difference out of range")
@@ -426,6 +455,8 @@ class TFGuptaClassifier(keras.Model):
         ----------
         event_class
             One-hot encoded array of length 2N+1 (N is the number of known appliances).
+        current_apparent_power
+            Current, total value of apparent power            
 
         Returns
         -------
@@ -433,36 +464,40 @@ class TFGuptaClassifier(keras.Model):
         """
 
         # updated_state_vector = copy.deepcopy(self.current_state_vector)
-
+        
         event_index = tf.math.argmax(event_class, output_type=tf.int32)
         tf.print("event index is ",event_index)
-        if event_index < self.n_known_appliances:
-        # Known appliance is switched on           
-            appliance_index = event_index
-            if self.check_physical_condition_switch_on(appliance_index=appliance_index, 
+        if 0 < self.apparent_power_threshold < 1:
+        # Calculate state vector considering physical boundary conditions        
+            if event_index < self.n_known_appliances:
+            # Known appliance is switched on           
+                appliance_index = event_index
+                if self.check_physical_condition_switch_on(appliance_index=appliance_index, 
                                                        current_apparent_power=current_apparent_power):
-                tf.print("physical condition ok")
-                new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
+                    tf.print("physical condition ok")
+                    new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
                         indices=[[appliance_index]],
                         updates=[self.apparent_power_list[event_index]])
-            else:
-                new_state_vector = self.current_state_vector
+                else:
+                    new_state_vector = self.current_state_vector
 			
-        elif self.n_known_appliances <= event_index < self.n_known_appliances * 2 :
-        # Known appliance is switched off
-            appliance_index = tf.math.subtract(event_index, self.n_known_appliances)
-            if self.check_physical_condition_switch_off(appliance_index=appliance_index, 
+            elif self.n_known_appliances <= event_index < self.n_known_appliances * 2 :
+            # Known appliance is switched off
+                appliance_index = tf.math.subtract(event_index, self.n_known_appliances)
+                if self.check_physical_condition_switch_off(appliance_index=appliance_index, 
                                                        current_apparent_power=current_apparent_power):
-                tf.print("physical condition ok")
-                new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
+                    tf.print("physical condition ok")
+                    new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
                         indices=[[appliance_index]],
                         updates=[tf.constant(0, dtype=tf.float32)])
+                else:
+                    new_state_vector = self.current_state_vector
             else:
                 new_state_vector = self.current_state_vector
         else:
-            new_state_vector = self.current_state_vector
-"""        new_state_vector = tf.case(
-            pred_fn_pairs=[
+         # Calculate state vector without considering physical boundary conditions         
+            new_state_vector = tf.case(
+                pred_fn_pairs=[
                 # Case 1: Known appliance is switched on
                 (tf.math.less(event_index, self.n_known_appliances),
                  lambda: tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
@@ -476,10 +511,10 @@ class TFGuptaClassifier(keras.Model):
                  lambda: tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
                                                      indices=[[tf.math.subtract(event_index, self.n_known_appliances)]],
                                                      updates=[tf.constant(0, dtype=tf.float32)])),
-            ],
-            default=lambda: self.current_state_vector
-        )
-        """	
+                ],
+                default=lambda: self.current_state_vector
+            )
+        	
         tf.print("new state vector is ",new_state_vector)
 
         return new_state_vector

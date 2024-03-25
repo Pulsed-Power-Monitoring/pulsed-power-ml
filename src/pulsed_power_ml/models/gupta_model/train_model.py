@@ -47,6 +47,10 @@ def main():
                         help='Increase the verbosity of the model',
                         action='store_true',
                         default=False)
+    parser.add_argument('-c',
+                       '--phys-bound-cond',
+                       type=float,
+                       help="Allowed power range ratio (between 0 and 1)")
     args = parser.parse_args()
 
     # Load parameters
@@ -63,6 +67,15 @@ def main():
     print(f'\nLoad labels from {args.labels}')
     labels = np.loadtxt(args.labels, delimiter=',')
 
+    # Check if enable physical boundary condition feature
+    power_threshold = 0
+    if args.phys_bound_cond is not None:
+        if args.phys_bound_cond <= 0 or args.phys_bound_cond >= 1:
+            print('\nWarning: Value for -c / --phys-bound-cond should be between 0 and 1')
+        else:
+            power_threshold = args.phys_bound_cond
+            print('\nModel with physical boundary condition')
+            
     # Instantiate model
     gupta_model = TFGuptaClassifier(
         window_size=parameter_dict["window_size"],
@@ -78,6 +91,7 @@ def main():
         training_data_features=tf.constant(features, dtype=np.float32),
         training_data_labels=tf.constant(labels, dtype=np.float32),
         verbose=tf.constant(args.verbose, dtype=tf.bool),
+        apparent_power_threshold=tf.constant(power_threshold, dtype=np.float32),
     )
 
     # Reset model
