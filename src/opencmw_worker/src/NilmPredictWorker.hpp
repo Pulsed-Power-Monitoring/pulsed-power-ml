@@ -164,7 +164,7 @@ public:
                             int64_t         size = static_cast<int64_t>(dataPoint.size());
                             cppflow::tensor input(dataPoint, { size });
 
-                            auto            output = _model({ { "serving_default_args_0:0", input } }, { "StatefulPartitionedCall:0" });
+                            auto            output = _model({ { "serving_default_inputs:0", input } }, { "StatefulPartitionedCall:0" });
 
                             auto            values = output[0].get_data<float>();
 
