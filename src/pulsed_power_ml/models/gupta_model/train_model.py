@@ -68,11 +68,13 @@ def main():
     labels = np.loadtxt(args.labels, delimiter=',')
 
     # Check if enable physical boundary condition feature
-    power_threshold = 0
+    check_phy_condition = False
+    power_threshold = 0.0    
     if args.phys_bound_cond is not None:
         if args.phys_bound_cond <= 0 or args.phys_bound_cond >= 1:
             print('\nWarning: Value for -c / --phys-bound-cond should be between 0 and 1')
         else:
+            check_phy_condition = True
             power_threshold = args.phys_bound_cond
             print('\nModel with physical boundary condition')
             
@@ -91,7 +93,8 @@ def main():
         training_data_features=tf.constant(features, dtype=np.float32),
         training_data_labels=tf.constant(labels, dtype=np.float32),
         verbose=tf.constant(args.verbose, dtype=tf.bool),
-        apparent_power_threshold=tf.constant(power_threshold, dtype=np.float32),
+        check_phy_condition=tf.constant(check_phy_condition, dtype=tf.bool),
+        apparent_power_threshold=tf.constant(power_threshold, dtype=tf.float32),
     )
 
     # Reset model
