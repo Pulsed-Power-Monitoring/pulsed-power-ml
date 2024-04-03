@@ -347,7 +347,7 @@ def tf_switch_detected(res_spectrum: tf.Tensor,
         tf.print('spectrum_min = ', spectrum_min)
         tf.print('spectrum_max = ', spectrum_max)
 
-    if tf.greater_equal(spectrum_max, threshold) or tf.less_equal(spectrum_min, threshold):
+    if tf.greater_equal(spectrum_max, threshold) or tf.less_equal(spectrum_min, (-1) * threshold):
         return tf.constant(True, dtype=tf.bool)
     else:
         return tf.constant(False, dtype=tf.bool)
