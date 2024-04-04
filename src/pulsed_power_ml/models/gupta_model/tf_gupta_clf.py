@@ -408,12 +408,8 @@ class TFGuptaClassifier(keras.Model):
             return False
         
         # Calculate power difference before and after switch on event
-        power_before_switch = tf.math.reduce_mean(
-                                         input_tensor=self.power_window[2 * self.window_size:], 
-                                         axis=0)               
-        power_after_switch = tf.math.reduce_mean(
-                                         input_tensor=self.power_window[:self.window_size:],            
-                                         axis=0)         
+        power_before_switch = tf.math.reduce_mean(self.power_window[2 * self.window_size:])               
+        power_after_switch = tf.math.reduce_mean(self.power_window[:self.window_size])         
         power_difference = tf.math.subtract(power_after_switch, power_before_switch)
         # Check if the power difference is in allowed range
         appliance_power =  self.apparent_power_list[appliance_index]
@@ -446,12 +442,8 @@ class TFGuptaClassifier(keras.Model):
             return False
             
         # Calculate power difference before and after switch off event
-        power_before_switch = tf.math.reduce_mean(
-                                         input_tensor=self.power_window[2 * self.window_size:], 
-                                         axis=0)               
-        power_after_switch = tf.math.reduce_mean(
-                                         input_tensor=self.power_window[:self.window_size:],            
-                                         axis=0)         
+        power_before_switch = tf.math.reduce_mean(self.power_window[2 * self.window_size:])               
+        power_after_switch = tf.math.reduce_mean(self.power_window[:self.window_size])         
         power_difference = tf.math.subtract(power_before_switch, power_after_switch)
         # Check if the power difference is in allowed range
         appliance_power =  self.apparent_power_list[appliance_index]
