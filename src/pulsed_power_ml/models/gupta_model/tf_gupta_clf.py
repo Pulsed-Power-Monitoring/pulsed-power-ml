@@ -122,11 +122,46 @@ class TFGuptaClassifier(keras.Model):
                                               trainable=False,
                                               name='n_frames_in_window')
         
-        # Power window for physical boundary condition                                     
-        self.power_window = tf.Variable(tf.zeros(shape=(3 * self.window_size), dtype=tf.float32),
+        # Variables for physical boundary condition                                     
+        self.check_power_diff_later = tf.Variable(initial_value=False, 
+                                            dtype=tf.bool,
+                                            trainable=False,
+                                            name='check_power_diff_later')
+
+        self.switched_on_appliance_index = tf.Variable(initial_value=-1,
+                                                       dtype=tf.int32,
+                                                       trainable=False,
+                                                       name='switched_on_appliance_index')
+                                                       
+        self.switched_off_appliance_index = tf.Variable(initial_value=-1,
+                                                        dtype=tf.int32,
+                                                        trainable=False,  
+                                                        name='switched_off_appliance_index')                                                
+                                           
+        self.power_before_switch = tf.Variable(initial_value=-1,
+                                               dtype=tf.float32,
+                                               trainable=False,
+                                               name='power_before_switch')      
+ 
+        self.power_after_switch = tf.Variable(initial_value=-1,
+                                              dtype=tf.float32,
+                                              trainable=False,
+                                              name='power_after_switch')                                                 
+                                                   
+        self.power_window = tf.Variable(tf.zeros(shape=(5 * self.window_size), dtype=tf.float32),
                                         dtype=tf.float32,
                                         trainable=False,
                                         name='power_window')                       
+ 
+        self.n_in_power_window = tf.Variable(initial_value=0,
+                                             dtype=tf.int32,
+                                             trainable=False,
+                                             name='n_in_power_window')
+                                            
+        self.skip_power_counter = tf.Variable(initial_value=0,
+                                              dtype=tf.int32,
+                                              trainable=False,
+                                              name='skip_power_counter')
                                                             
         # Apparent Power data base
         self.apparent_power_list = apparent_power_list
@@ -274,6 +309,9 @@ class TFGuptaClassifier(keras.Model):
 
         if self.check_phy_condition:
             self.update_power_window(apparent_power)
+            if self.check_power_diff_later:
+                self.check_apparent_power_diff(current_apparent_power=apparent_power)
+
                 
         # #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++# #
         # #+++ Check if there are enough frames in the current window +++# #
@@ -292,7 +330,7 @@ class TFGuptaClassifier(keras.Model):
 
         # calculate mean background
         current_background = tf.math.reduce_mean(
-            input_tensor=self.window[:self.window_size],
+            input_tensor=self.window[2 * self.window_size:],
             axis=0,
             name='calculate_mean_background'
         )
@@ -332,7 +370,7 @@ class TFGuptaClassifier(keras.Model):
         # #+++ Classification +++# #
         # #++++++++++++++++++++++# #
         clf_spectrum = tf.math.reduce_mean(
-            input_tensor=self.window[2 * self.window_size:],
+            input_tensor=self.window[:self.window_size],
             axis=0,
             name='calculate_mean_clf_spectrum'
         )
@@ -406,20 +444,19 @@ class TFGuptaClassifier(keras.Model):
         if self.current_state_vector[appliance_index] != 0:
             tf.print("Device can only be switched on when it is off before")
             return False
-        
-        # Calculate power difference before and after switch on event
-        power_before_switch = tf.math.reduce_mean(self.power_window[2 * self.window_size:])               
-        power_after_switch = tf.math.reduce_mean(self.power_window[:self.window_size])         
-        power_difference = tf.math.subtract(power_after_switch, power_before_switch)
-        # Check if the power difference is in allowed range
-        appliance_power =  self.apparent_power_list[appliance_index]
-        power_threshold = appliance_power * self.apparent_power_threshold            
-        if tf.math.logical_or(tf.math.greater(power_difference, tf.math.add(appliance_power, power_threshold)),
-                              tf.math.less(power_difference, tf.math.subtract(appliance_power, power_threshold))):
-            tf.print("Power difference out of range")             
-            return False
-        else:
-            return True        
+
+        # Calculate apparent power before switch
+        self.power_before_switch.assign(
+            tf.math.reduce_mean(
+                input_tensor=self.power_window[(self.n_in_power_window - self.window_size):(self.n_in_power_window - 1)]
+            )
+        )
+        tf.print("Power before device", appliance_index, "switched on:", self.power_before_switch) 
+        # Calculate apparent power after switch later
+        self.check_power_diff_later.assign(True)
+        self.skip_power_counter.assign(0) 
+        self.switched_on_appliance_index.assign(appliance_index)       
+        return True
 
     def check_physical_condition_switch_off(self, appliance_index):
         """
@@ -441,19 +478,18 @@ class TFGuptaClassifier(keras.Model):
             tf.print("Device can only be switched off when it is on before")
             return False
             
-        # Calculate power difference before and after switch off event
-        power_before_switch = tf.math.reduce_mean(self.power_window[2 * self.window_size:])               
-        power_after_switch = tf.math.reduce_mean(self.power_window[:self.window_size])         
-        power_difference = tf.math.subtract(power_before_switch, power_after_switch)
-        # Check if the power difference is in allowed range
-        appliance_power =  self.apparent_power_list[appliance_index]
-        power_threshold = appliance_power * self.apparent_power_threshold            
-        if tf.math.logical_or(tf.math.greater(power_difference, tf.math.add(appliance_power, power_threshold)),
-                              tf.math.less(power_difference, tf.math.subtract(appliance_power, power_threshold))):
-            tf.print("Power difference out of range")             
-            return False
-        else:
-            return True        
+        # Calculate apparent power before switch
+        self.power_before_switch.assign(
+            tf.math.reduce_mean(
+                input_tensor=self.power_window[(self.n_in_power_window - self.window_size):(self.n_in_power_window - 1)]
+            )
+        )
+        tf.print("Power before device ", appliance_index, " switched off:", self.power_before_switch)      
+        # Calculate apparent power after switch later
+        self.check_power_diff_later.assign(True)
+        self.skip_power_counter.assign(0) 
+        self.switched_off_appliance_index.assign(appliance_index)       
+        return True   
                         
     def calculate_state_vector(self,
                                event_class: tf.Tensor) -> tf.Tensor:
@@ -475,14 +511,13 @@ class TFGuptaClassifier(keras.Model):
         # updated_state_vector = copy.deepcopy(self.current_state_vector)
         
         event_index = tf.math.argmax(event_class, output_type=tf.int32)
-        tf.print("event index is ",event_index)
+        tf.print("************************************event index is",event_index,"***********************")
         if self.check_phy_condition:
         # Calculate state vector considering physical boundary conditions        
             if event_index < self.n_known_appliances:
             # Known appliance is switched on 
                 appliance_index = event_index          
-                if self.check_physical_condition_switch_on(appliance_index=appliance_index):
-                    tf.print("physical condition ok")
+                if self.check_physical_condition_switch_on(appliance_index=appliance_index):                    
                     new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
                         indices=[[appliance_index]],
                         updates=[self.apparent_power_list[appliance_index]])
@@ -493,7 +528,6 @@ class TFGuptaClassifier(keras.Model):
             # Known appliance is switched off
                 appliance_index = tf.math.subtract(event_index, self.n_known_appliances)
                 if self.check_physical_condition_switch_off(appliance_index=appliance_index):
-                    tf.print("physical condition ok")
                     new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
                         indices=[[appliance_index]],
                         updates=[tf.constant(0, dtype=tf.float32)])
@@ -520,9 +554,7 @@ class TFGuptaClassifier(keras.Model):
                                                      updates=[tf.constant(0, dtype=tf.float32)])),
                 ],
                 default=lambda: self.current_state_vector
-            )
-        	
-        tf.print("new state vector is ",new_state_vector)
+            )        	
 
         return new_state_vector
 
@@ -597,14 +629,92 @@ class TFGuptaClassifier(keras.Model):
         )
 
         return self.current_state_vector
-    
+                                                         
+            
+    def check_apparent_power_diff(self,
+                                  current_apparent_power: tf.Tensor) -> None:
+ 
+        # Counter
+        self.skip_power_counter.assign(tf.add(self.skip_power_counter,1))    
+           
+        if tf.math.greater_equal(self.skip_power_counter,self.window_size * 7):
+            self.power_after_switch.assign(tf.math.reduce_mean(
+		                               input_tensor=self.power_window[:self.window_size]))                      
+      
+        if self.power_before_switch != -1 and self.power_after_switch != -1:
+                                     
+            if self.switched_on_appliance_index != -1:
+                tf.print("Power after device", self.switched_on_appliance_index, "switched on:", self.power_after_switch)
+                diff_power = tf.math.subtract(self.power_after_switch, self.power_before_switch)
+                if self.is_power_diff_in_range(power_difference=diff_power, 
+                                               appliance_index=self.switched_on_appliance_index):
+                    tf.print("Power difference is in allowed range")
+                else:
+                    tf.print("Power difference out of range, device", 
+                             self.switched_on_appliance_index,"is not on, roll back state vector" )             
+                    # Roll back state vector
+                    self.current_state_vector.assign(tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
+                                                                         indices=[[self.switched_on_appliance_index]],
+                                                                         updates=[tf.constant(0, dtype=tf.float32)]))
+                    # Update power value for unknown
+                    self.current_state_vector.assign(
+                    self.calculate_unknown_apparent_power(current_apparent_power=current_apparent_power)
+                    ) 
+                                                                                                                                           
+                self.switched_on_appliance_index.assign(-1)
+                    
+            if self.switched_off_appliance_index != -1:
+                tf.print("Power after device", self.switched_off_appliance_index, "switched off:", self.power_after_switch)
+                diff_power = tf.math.subtract(self.power_before_switch, self.power_after_switch)  
+                if self.is_power_diff_in_range(power_difference=diff_power, 
+                                               appliance_index=self.switched_off_appliance_index):
+                    tf.print("Power difference is in allowed range")
+                else:
+                    tf.print("Power difference out of range, device", 
+                             self.switched_off_appliance_index,"is not off, roll back state vector" )             
+                    # Roll back state vector
+                    appliance_power = self.apparent_power_list[self.switched_off_appliance_index]
+                    self.current_state_vector.assign(tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
+                                                                                 indices=[[self.switched_off_appliance_index]],
+                                                                                 updates=[appliance_power]))
+                    # Update power value for unknown
+                    self.current_state_vector.assign(
+                        self.calculate_unknown_apparent_power(current_apparent_power=current_apparent_power)
+                    )                                      
+                self.switched_off_appliance_index.assign(-1)
+                
+            self.check_power_diff_later.assign(False)
+            self.power_before_switch.assign(-1)
+            self.power_after_switch.assign(-1) 
+        
+        return None
+                
+    def is_power_diff_in_range(self,
+                               power_difference:tf.Tensor, 
+                               appliance_index:tf.Tensor):
+                                    
+        # Check if the power difference is in allowed range
+        appliance_power = self.apparent_power_list[appliance_index]
+        power_threshold = appliance_power * self.apparent_power_threshold            
+        if tf.math.logical_or(tf.math.greater(power_difference, tf.math.add(appliance_power, power_threshold)),
+                              tf.math.less(power_difference, tf.math.subtract(appliance_power, power_threshold))):
+            return False                                                                                     
+        else:
+            return True
+                 
     def update_power_window(self, apparent_power) -> None:
         if self.check_phy_condition:
             self.power_window.assign(
                 tf.tensor_scatter_nd_update(tensor=tf.roll(self.power_window, shift=1, axis=0),
                                             indices=[[0]],
                                             updates=[apparent_power])
-            )    
+            ) 
+            if tf.math.less(self.n_in_power_window, self.window_size * 5):
+                self.n_in_power_window.assign(
+                    tf.add(self.n_in_power_window,
+                           tf.constant(1, dtype=tf.int32)
+                          )
+                )   
         return None
         
     def update_window(self, input_tensor: tf.Tensor) -> None:
