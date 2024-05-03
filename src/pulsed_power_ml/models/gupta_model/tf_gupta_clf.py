@@ -7,7 +7,7 @@ from typing import Tuple
 import tensorflow as tf
 from tensorflow import keras
 
-from src.pulsed_power_ml.models.gupta_model.gupta_utils import tf_switch_detected_new
+from src.pulsed_power_ml.models.gupta_model.gupta_utils import tf_switch_detected
 from src.pulsed_power_ml.models.gupta_model.gupta_utils import tf_calculate_feature_vector
 
 
@@ -157,7 +157,12 @@ class TFGuptaClassifier(keras.Model):
                                              dtype=tf.int32,
                                              trainable=False,
                                              name='n_in_power_window')
-                                            
+        
+        self.skip_power_max = tf.Variable(initial_value=(5 * window_size),
+                                          dtype=tf.int32,
+                                          trainable=False,
+                                          name='skip_power_max')  
+                                          
         self.skip_power_counter = tf.Variable(initial_value=0,
                                               dtype=tf.int32,
                                               trainable=False,
@@ -336,7 +341,12 @@ class TFGuptaClassifier(keras.Model):
         )
 
         # calculate difference spectrum for switch detection
-        current_signal = self.window[2 * self.window_size - 2]
+        current_signal = tf.math.reduce_mean(
+            input_tensor=self.window[self.window_size:2 * self.window_size],
+            axis=0,
+            name='calculate_mean_signal'
+        )
+        
         difference_spectrum = tf.math.subtract(
             x=current_signal,
             y=current_background,
@@ -344,7 +354,7 @@ class TFGuptaClassifier(keras.Model):
         )
 
         # Switching Event Detected?
-        switch_flag = tf_switch_detected_new(difference_spectrum, 0.5)
+        switch_flag = tf_switch_detected(difference_spectrum, self.switch_threshold)
 
         if not switch_flag:
             self.current_state_vector.assign(
@@ -359,7 +369,7 @@ class TFGuptaClassifier(keras.Model):
         
         # Calculate cleaned spectrum for classification
         clf_spectrum = tf.math.reduce_mean(
-            input_tensor=self.window[: (2 * self.window_size - 1)],
+            input_tensor=self.window[:self.window_size],
             axis=0,
             name='calculate_mean_clf_spectrum'
         )
@@ -443,13 +453,14 @@ class TFGuptaClassifier(keras.Model):
         # Calculate apparent power before switch
         self.power_before_switch.assign(
             tf.math.reduce_mean(
-                input_tensor=self.power_window[(self.n_in_power_window - self.window_size):(self.n_in_power_window - 1)]
+                input_tensor=self.power_window[(self.n_in_power_window - self.window_size):self.n_in_power_window]
             )
         )
         tf.print("*****Power before device", appliance_index, "switched on:", self.power_before_switch) 
         # Calculate apparent power after switch later
         self.check_power_diff_later.assign(True)
         self.skip_power_counter.assign(0) 
+        self.skip_power_max.assign(self.get_check_power_diff_interval(appliance_index=appliance_index))
         self.switched_on_appliance_index.assign(appliance_index)       
         return True
 
@@ -476,13 +487,14 @@ class TFGuptaClassifier(keras.Model):
         # Calculate apparent power before switch
         self.power_before_switch.assign(
             tf.math.reduce_mean(
-                input_tensor=self.power_window[(self.n_in_power_window - self.window_size):(self.n_in_power_window - 1)]
+                input_tensor=self.power_window[(self.n_in_power_window - self.window_size):self.n_in_power_window]
             )
         )
         tf.print("*****Power before device ", appliance_index, " switched off:", self.power_before_switch)      
         # Calculate apparent power after switch later
         self.check_power_diff_later.assign(True)
         self.skip_power_counter.assign(0) 
+        self.skip_power_max.assign(self.get_check_power_diff_interval(appliance_index=appliance_index))
         self.switched_off_appliance_index.assign(appliance_index)       
         return True   
                         
@@ -632,7 +644,7 @@ class TFGuptaClassifier(keras.Model):
         # Counter
         self.skip_power_counter.assign(tf.add(self.skip_power_counter,1))    
            
-        if tf.math.greater_equal(self.skip_power_counter,self.window_size * 7):
+        if tf.math.greater_equal(self.skip_power_counter,self.skip_power_max):
             self.power_after_switch.assign(tf.math.reduce_mean(
 		                               input_tensor=self.power_window[:self.window_size]))                      
       
@@ -683,7 +695,15 @@ class TFGuptaClassifier(keras.Model):
             self.power_after_switch.assign(-1) 
         
         return None
-                
+    
+    def get_check_power_diff_interval(self,
+                                      appliance_index:tf.Tensor):
+        # Default interval value for check the power difference
+        default_interval = tf.constant(5 * self.window_size, dtype=tf.int32)  
+        if appliance_index == 0:
+            return tf.constant(10 * self.window_size, dtype=tf.int32)
+        return  default_interval
+                     
     def is_power_diff_in_range(self,
                                power_difference:tf.Tensor, 
                                appliance_index:tf.Tensor):
