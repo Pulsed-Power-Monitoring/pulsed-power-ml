@@ -8,6 +8,7 @@ from typing import Tuple
 from tqdm import tqdm
 import numpy as np
 import tensorflow as tf
+import math
 
 from src.pulsed_power_ml.model_framework.data_io import load_fft_file
 from src.pulsed_power_ml.model_framework.data_io import read_parameters
@@ -75,7 +76,7 @@ def get_features_from_raw_data(data_point_array: np.array,
         spectrum = 10 * np.log10(raw_spectrum) + 30
         window.append(spectrum)
 
-        if len(window) < window_size * 2 + 1:
+        if len(window) < window_size * 3:
             continue
 
         window_array = np.array(window)
@@ -84,22 +85,27 @@ def get_features_from_raw_data(data_point_array: np.array,
         mean_background = np.mean(window_array[:window_size], axis=0)
 
         # Calculate value for switch detection
-        spectrum_for_switch_detection = window_array[window_size + 1]
-        switch_detection_spectrum_cleaned = spectrum_for_switch_detection - mean_background
-        switch_value = np.mean(switch_detection_spectrum_cleaned, axis=0)
-        switch_value_array[i - window_size] = switch_value
-
+        spectrum_for_switch_detection = np.mean(window_array[window_size:window_size * 2], axis=0)
+        switch_detection_spectrum_cleaned = spectrum_for_switch_detection - mean_background     
+        max_value = np.max(switch_detection_spectrum_cleaned)
+        min_value = np.min(switch_detection_spectrum_cleaned)
+        if np.abs(min_value) > max_value:
+            switch_value = min_value
+        else:
+            switch_value = max_value
+        switch_value_array[i - math.floor(1.5 * window_size)] = switch_value
+        
         # switch detected
         if np.abs(switch_value) >= switch_detection_threshold:
 
             # Report detected switch
             n_switches_detected += 1
-            print(f"Switch deteted in Frame : {i - window_size}")
+            print(f"Switch detected in Frame between {i - 2 * window_size} and {i - window_size}")
             print(f"Switches detected in total : {n_switches_detected}")
-            switch_positions[i - window_size] = 1
+            switch_positions[i - math.floor(1.5 * window_size)] = 1
 
             # Calculate cleaned spectrum for feature vector calculation
-            spectra_for_feature_vector = window_array[window_size + 1:]
+            spectra_for_feature_vector = window_array[2 * window_size:]
             mean_spectrum_for_feature_vector = np.mean(spectra_for_feature_vector, axis=0)
             cleaned_spectrum_for_feature_vector = mean_spectrum_for_feature_vector - mean_background
 
@@ -111,7 +117,7 @@ def get_features_from_raw_data(data_point_array: np.array,
                 sample_rate=tf.constant(sample_rate, dtype=tf.int32))\
             .numpy()\
             .reshape((-1))
-
+            '''
             assert np.isnan(feature_vector).any() == False, \
                 ("Found NAN in feature vector! |"
                  f"{cleaned_spectrum_for_feature_vector=} |"
@@ -119,8 +125,16 @@ def get_features_from_raw_data(data_point_array: np.array,
                  f"{n_peaks=} |"
                  f"{fft_size_real=} |"
                  f"{sample_rate=} |")
-
+            
             feature_list.append(feature_vector)
+            '''
+            if np.isnan(feature_vector).any() == False:
+                feature_list.append(feature_vector)               
+            else:
+                print(f"Find NAN in feature vector!")
+                n_switches_detected -=1
+                switch_positions[i - math.floor(1.5 * window_size)] = 0
+            
             window.clear()
 
     return np.array(feature_list), switch_positions, switch_value_array
