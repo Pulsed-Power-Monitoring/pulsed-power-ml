@@ -8,3 +8,5 @@ H1: 42 # Halogen
 L1: 27 # Laptop
 PS1: 50 # Power supply
 R1: 50 # Fluoreszenzroehren
+S1: 4.15 # Steckdosenleiste
+SP1: 9 # Smartphone
