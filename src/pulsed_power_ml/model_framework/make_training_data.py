@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 sys.path.append("../../../")
 from src.pulsed_power_ml.model_framework.data_io import load_binary_data_array
 from src.pulsed_power_ml.model_framework.training_data_labelling import get_features_from_raw_data
+from src.pulsed_power_ml.model_framework.training_data_labelling import get_max_spectrum
 from src.pulsed_power_ml.model_framework.data_io import read_parameters
 
 try:
@@ -54,6 +55,7 @@ def main():
     data_point_array = load_binary_data_array(args.input,
                                               fft_size_data_point=parameter_dict['fft_size_real'])
 
+    max_spec_array = get_max_spectrum(data_point_array, parameter_dict)
     # Produce features
     features_array, switch_positions, switch_value_array = get_features_from_raw_data(
         data_point_array,
@@ -74,7 +76,7 @@ def main():
 
     # Produce plots
     fig = plt.figure(figsize=(16, 18), tight_layout=True)
-    ax = fig.add_subplot(2, 1, 1)
+    ax = fig.add_subplot(3, 1, 1)
     apparent_power_array = data_point_array[:, -2]
     ax.plot(apparent_power_array,
             label='Apparent Power')
@@ -87,7 +89,16 @@ def main():
     ax.legend()
     ax.set_title(f'Apparent Power & Switch Positions for {args.prefix}')
 
-    ax_switch_values = fig.add_subplot(2, 1, 2)
+    ax_max_spec = fig.add_subplot(3, 1, 2)
+    ax_max_spec.plot(max_spec_array,
+            label='Max spectrum')
+    ax_max_spec.set_xlabel('Time [a.u.]')
+    ax_max_spec.set_ylabel('db')
+    ax_max_spec.grid(True)
+    ax_max_spec.legend()
+    ax_max_spec.set_title(f'Max spectrum for {args.prefix}')
+        
+    ax_switch_values = fig.add_subplot(3, 1, 3)
     ax_switch_values.plot(
         switch_value_array,
         label="Switch Values"

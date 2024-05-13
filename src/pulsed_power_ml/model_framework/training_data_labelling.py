@@ -69,7 +69,11 @@ def get_features_from_raw_data(data_point_array: np.array,
         :,
         spectrum_type * fft_size_real:(spectrum_type + 1) * fft_size_real
     ]
-
+    
+    switch_start = None
+    switch_end = None
+    baseline_spectrum = None
+    
     for i, raw_spectrum in tqdm(enumerate(raw_spectrum_array)):
 
         # Convert spectrum from VA to dBm (decibels relative to 1 mW)
@@ -97,45 +101,57 @@ def get_features_from_raw_data(data_point_array: np.array,
         
         # switch detected
         if np.abs(switch_value) >= switch_detection_threshold:
+            if switch_start == None:
+                switch_start = i - (2 * window_size)
+                baseline_spectrum = mean_background
+                
+            for j in range(step_size):
+                _ = window.popleft()
+        else:
+            if switch_start != None:
+                # Report detected switch
+                switch_end = i - (2  * window_size)
+                n_switches_detected += 1
+                print(f"Switch detected in Frame between {switch_start} and {switch_end}")
+                print(f"Switches detected in total : {n_switches_detected}")
+                switch_positions[switch_start] = 1
 
-            # Report detected switch
-            n_switches_detected += 1
-            print(f"Switch detected in Frame between {i - 2 * window_size} and {i - window_size}")
-            print(f"Switches detected in total : {n_switches_detected}")
-            switch_positions[i - math.floor(1.5 * window_size)] = 1
+                # Calculate cleaned spectrum for feature vector calculation
+                spectra_for_feature_vector = window_array[2 * window_size:]
+                mean_spectrum_for_feature_vector = np.mean(spectra_for_feature_vector, axis=0)
+                cleaned_spectrum_for_feature_vector = mean_spectrum_for_feature_vector - baseline_spectrum
 
-            # Calculate cleaned spectrum for feature vector calculation
-            spectra_for_feature_vector = window_array[2 * window_size:]
-            mean_spectrum_for_feature_vector = np.mean(spectra_for_feature_vector, axis=0)
-            cleaned_spectrum_for_feature_vector = mean_spectrum_for_feature_vector - mean_background
-
-            # Calculate feature vector
-            feature_vector = tf_calculate_feature_vector(
-                cleaned_spectrum=tf.constant(cleaned_spectrum_for_feature_vector, dtype=tf.float32),
-                n_peaks_max=tf.constant(n_peaks, dtype=tf.int32),
-                fft_size_real=tf.constant(fft_size_real, dtype=tf.int32),
-                sample_rate=tf.constant(sample_rate, dtype=tf.int32))\
-            .numpy()\
-            .reshape((-1))
-            '''
-            assert np.isnan(feature_vector).any() == False, \
-                ("Found NAN in feature vector! |"
-                 f"{cleaned_spectrum_for_feature_vector=} |"
-                 f"nans in mean_clf = {np.isnan(cleaned_spectrum_for_feature_vector).any()} |"
-                 f"{n_peaks=} |"
-                 f"{fft_size_real=} |"
-                 f"{sample_rate=} |")
+                # Calculate feature vector
+                feature_vector = tf_calculate_feature_vector(
+                    cleaned_spectrum=tf.constant(cleaned_spectrum_for_feature_vector, dtype=tf.float32),
+                    n_peaks_max=tf.constant(n_peaks, dtype=tf.int32),
+                    fft_size_real=tf.constant(fft_size_real, dtype=tf.int32),
+                    sample_rate=tf.constant(sample_rate, dtype=tf.int32))\
+                    .numpy()\
+                    .reshape((-1))
             
-            feature_list.append(feature_vector)
-            '''
-            if np.isnan(feature_vector).any() == False:
-                feature_list.append(feature_vector)               
-            else:
-                print(f"Find NAN in feature vector!")
-                n_switches_detected -=1
-                switch_positions[i - math.floor(1.5 * window_size)] = 0
+                '''
+                assert np.isnan(feature_vector).any() == False, \
+                    ("Found NAN in feature vector! |"
+                     f"{cleaned_spectrum_for_feature_vector=} |"
+                     f"nans in mean_clf = {np.isnan(cleaned_spectrum_for_feature_vector).any()} |"
+                     f"{n_peaks=} |"
+                     f"{fft_size_real=} |"
+                     f"{sample_rate=} |")
             
-            window.clear()
+                feature_list.append(feature_vector)
+                '''
+                if np.isnan(feature_vector).any() == False:
+                    feature_list.append(feature_vector)               
+                else:
+                    print(f"Find NAN in feature vector!")
+                    n_switches_detected -=1
+                    switch_positions[switch_start] = 0
+                    
+                # Clear switch record     
+                switch_start = None
+                switch_end = None
+                baseline_spectrum = None
 
     return np.array(feature_list), switch_positions, switch_value_array
 
@@ -176,7 +192,25 @@ def remove_false_positive_switching_events(feature_vector_array: np.array,
 
     return corrected_feature_vector_array, corrected_switch_positions
 
+def get_max_spectrum(data_point_array: np.array, parameter_dict: dict) -> np.array:
+    # Get parameters from parameter dict
+    fft_size_real = int(parameter_dict['fft_size_real'])
+    spectrum_type = int(parameter_dict['spectrum_type'])
+    
+    # Slice data_point_array to get only apparent power spcetrum
+    raw_spectrum_array = data_point_array[
+        :,
+        spectrum_type * fft_size_real:(spectrum_type + 1) * fft_size_real
+    ]
+    spectrum_array = np.zeros(shape=len(data_point_array))
+    for i, raw_spectrum in tqdm(enumerate(raw_spectrum_array)):
 
+        # Convert spectrum from VA to dBm (decibels relative to 1 mW)
+        spectrum = 10 * np.log10(raw_spectrum) + 30
+        maxspec = np.max(spectrum)
+        spectrum_array[i] = maxspec
+    return spectrum_array
+    
 def trainingdata_switch_detector(spectra: np.ndarray, parameters: dict) -> np.ndarray:
     """
     Function to automatically label training spectra (from GNU Radio).

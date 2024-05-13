@@ -7,8 +7,8 @@ appliances:
   - 6: R1, R2 # Fluoreszenzroehren
   - 7: S1 # Steckdosenleiste
   - 8: SP1 # Smartphone
-window_size: 10
-step_size: 10
+window_size: 15
+step_size: 5
 switch_threshold: 20
 distance_threshold: 100
 fft_size: 131072
