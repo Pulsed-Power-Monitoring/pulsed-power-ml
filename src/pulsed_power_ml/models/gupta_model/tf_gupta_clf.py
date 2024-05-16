@@ -122,6 +122,16 @@ class TFGuptaClassifier(keras.Model):
                                               trainable=False,
                                               name='n_frames_in_window')
         
+        self.switching_flag = tf.Variable(initial_value=False, 
+                                          dtype=tf.bool,
+                                          trainable=False,
+                                          name='switching_flag')
+        self.base_spectrum = tf.Variable(
+            initial_value=tf.zeros(shape=self.fft_size_real,dtype=tf.float32),
+            dtype=tf.float32,
+            trainable=False,
+            name='base_spectrum'
+        )
         # Variables for physical boundary condition                                     
         self.check_power_diff_later = tf.Variable(initial_value=False, 
                                             dtype=tf.bool,
@@ -354,15 +364,34 @@ class TFGuptaClassifier(keras.Model):
         )
 
         # Switching Event Detected?
-        switch_flag = tf_switch_detected(difference_spectrum, self.switch_threshold)
-
-        if not switch_flag:
+        switch_detected = tf_switch_detected(difference_spectrum, self.switch_threshold)
+        
+        if not switch_detected and not self.switching_flag:
+            self.current_state_vector.assign(
+                self.calculate_unknown_apparent_power(current_apparent_power=apparent_power)
+                )
+            return self.current_state_vector
+                    
+        if switch_detected:
+            if not self.switching_flag:
+                # Switching process start
+                self.switching_flag.assign(True)
+                self.base_spectrum.assign(current_background)
+            
+            # Skip step size
+            self.n_frames_in_window.assign(
+                tf.math.subtract(
+                    x=self.n_frames_in_window,
+                    y=self.step_size
+                )            
+            )
             self.current_state_vector.assign(
                 self.calculate_unknown_apparent_power(current_apparent_power=apparent_power)
             )
-
             return self.current_state_vector
-
+                
+        # Switching process end
+        
         # #++++++++++++++++++++++# #
         # #+++ Classification +++# #
         # #++++++++++++++++++++++# #
@@ -375,7 +404,7 @@ class TFGuptaClassifier(keras.Model):
         )
         cleaned_clf_spectrum = tf.math.subtract(
             x=clf_spectrum,
-            y=current_background,
+            y=self.base_spectrum,
             name='calculate_cleaned_clf_spectrum'
         )
 
@@ -387,9 +416,10 @@ class TFGuptaClassifier(keras.Model):
             )
         )
 
-        # Clear window to take account of the new baseline
-        self.clear_window()
-
+        # Clear switching record to take account of the new baseline
+        self.switching_flag.assign(False)
+        self.base_spectrum.assign(tf.zeros(shape=self.fft_size_real,dtype=tf.float32))
+        
         self.current_state_vector.assign(
             self.calculate_unknown_apparent_power(current_apparent_power=apparent_power)
         )
@@ -482,7 +512,7 @@ class TFGuptaClassifier(keras.Model):
             
         if self.current_state_vector[appliance_index] == 0:
             tf.print("Device can only be switched off when it is on before")
-            return False
+            return False 
             
         # Calculate apparent power before switch
         self.power_before_switch.assign(
@@ -490,7 +520,7 @@ class TFGuptaClassifier(keras.Model):
                 input_tensor=self.power_window[(self.n_in_power_window - self.window_size):self.n_in_power_window]
             )
         )
-        tf.print("*****Power before device ", appliance_index, " switched off:", self.power_before_switch)      
+        tf.print("*****Power before device", appliance_index, "switched off:", self.power_before_switch)      
         # Calculate apparent power after switch later
         self.check_power_diff_later.assign(True)
         self.skip_power_counter.assign(0) 
@@ -520,7 +550,7 @@ class TFGuptaClassifier(keras.Model):
         event_index = tf.math.argmax(event_class, output_type=tf.int32)
         tf.print("************************************event index is",event_index,"***********************")
         if self.check_phy_condition:
-        # Calculate state vector considering physical boundary conditions        
+        # Calculate state vector considering physical boundary conditions          
             if event_index < self.n_known_appliances:
             # Known appliance is switched on 
                 appliance_index = event_index          
@@ -564,7 +594,7 @@ class TFGuptaClassifier(keras.Model):
             )        	
 
         return new_state_vector
-
+        
     def calculate_unknown_apparent_power(self, current_apparent_power: tf.Tensor) -> tf.Tensor:
         """
         Calculate an updated version of the state vector with an updated value of "unknown".
