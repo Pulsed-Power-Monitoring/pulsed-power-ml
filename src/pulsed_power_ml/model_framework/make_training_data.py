@@ -57,7 +57,7 @@ def main():
 
     max_spec_array = get_max_spectrum(data_point_array, parameter_dict)
     # Produce features
-    features_array, switch_positions, switch_value_array = get_features_from_raw_data(
+    features_array, switch_positions, switch_value_array, NaN_array = get_features_from_raw_data(
         data_point_array,
         parameter_dict,
         switch_detection_threshold=switch_detection_threshold
@@ -88,6 +88,8 @@ def main():
     ax.grid(True)
     ax.legend()
     ax.set_title(f'Apparent Power & Switch Positions for {args.prefix}')
+    if NaN_array.size != 0:
+        ax.vlines(NaN_array, ymin=0, ymax=0.5 * max(apparent_power_array), color='red')
 
     ax_max_spec = fig.add_subplot(3, 1, 2)
     ax_max_spec.plot(max_spec_array,
@@ -116,7 +118,7 @@ def main():
     ax_switch_values.set_ylabel("Switch Value")
     ax_switch_values.set_title("Switch values per Frame")
     ax_switch_values.legend()
-
+    ax_switch_values.grid(True)
     # Add numbers to switching events
     for i, s in enumerate(np.nonzero(switch_positions)[0]):
         y = -1.25 if i % 2 != 0 else -0.5

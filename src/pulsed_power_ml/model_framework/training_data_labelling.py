@@ -22,7 +22,7 @@ from src.pulsed_power_ml.models.gupta_model.gupta_utils import tf_calculate_feat
 
 def get_features_from_raw_data(data_point_array: np.array, 
                                parameter_dict: dict,
-                               switch_detection_threshold: float = np.inf) -> Tuple[np.array, np.array]:
+                               switch_detection_threshold: float = np.inf) -> Tuple[np.array, np.array, np.array, np.array]:
     """
     This function applies the Gupta approach to the input data and returns a list of features for 
     all detected switching events.
@@ -61,6 +61,7 @@ def get_features_from_raw_data(data_point_array: np.array,
     window = deque(maxlen=window_size * 3)
     switch_value_array = np.zeros(shape=len(data_point_array))
     switch_positions = np.zeros(shape=len(data_point_array))
+    NaN_list = list()
     feature_list = list()
     n_switches_detected = 0
 
@@ -73,6 +74,7 @@ def get_features_from_raw_data(data_point_array: np.array,
     switch_start = None
     switch_end = None
     baseline_spectrum = None
+    pre_switch_value = 0
     
     for i, raw_spectrum in tqdm(enumerate(raw_spectrum_array)):
 
@@ -104,11 +106,15 @@ def get_features_from_raw_data(data_point_array: np.array,
             if switch_start == None:
                 switch_start = i - (2 * window_size)
                 baseline_spectrum = mean_background
+                pre_switch_value = np.abs(switch_value)
                 
-            for j in range(step_size):
-                _ = window.popleft()
-        else:
-            if switch_start != None:
+                for j in range(step_size):
+                    _ = window.popleft()
+                
+                continue
+            
+        if switch_start != None:
+            if np.abs(switch_value) < pre_switch_value:
                 # Report detected switch
                 switch_end = i - (2  * window_size)
                 n_switches_detected += 1
@@ -130,30 +136,28 @@ def get_features_from_raw_data(data_point_array: np.array,
                     .numpy()\
                     .reshape((-1))
             
-                '''
-                assert np.isnan(feature_vector).any() == False, \
-                    ("Found NAN in feature vector! |"
-                     f"{cleaned_spectrum_for_feature_vector=} |"
-                     f"nans in mean_clf = {np.isnan(cleaned_spectrum_for_feature_vector).any()} |"
-                     f"{n_peaks=} |"
-                     f"{fft_size_real=} |"
-                     f"{sample_rate=} |")
-            
-                feature_list.append(feature_vector)
-                '''
                 if np.isnan(feature_vector).any() == False:
-                    feature_list.append(feature_vector)               
+                    feature_list.append(feature_vector) 
+                    for j in range(window_size):
+                       _ = window.popleft()              
                 else:
                     print(f"Find NAN in feature vector!")
+                    NaN_list.append(switch_start)
                     n_switches_detected -=1
                     switch_positions[switch_start] = 0
-                    
+                 
                 # Clear switch record     
                 switch_start = None
                 switch_end = None
                 baseline_spectrum = None
-
-    return np.array(feature_list), switch_positions, switch_value_array
+                pre_switch_value = 0
+            else:
+                
+                for j in range(step_size):
+                    _ = window.popleft()
+                    
+            pre_switch_value = np.abs(switch_value)
+    return np.array(feature_list), switch_positions, switch_value_array, np.array(NaN_list)
 
 
 def remove_false_positive_switching_events(feature_vector_array: np.array,
