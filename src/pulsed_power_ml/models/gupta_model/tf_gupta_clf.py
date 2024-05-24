@@ -479,7 +479,11 @@ class TFGuptaClassifier(keras.Model):
         if self.current_state_vector[appliance_index] != 0:
             tf.print("Device can only be switched on when it is off before")
             return False
-
+            
+        if self.check_power_diff_later:
+            tf.print("!!!Warning: Last apparent power checking is not finished!!!") 
+            return False
+            
         # Calculate apparent power before switch
         self.power_before_switch.assign(
             tf.math.reduce_mean(
@@ -513,7 +517,11 @@ class TFGuptaClassifier(keras.Model):
         if self.current_state_vector[appliance_index] == 0:
             tf.print("Device can only be switched off when it is on before")
             return False 
-            
+
+        if self.check_power_diff_later:
+            tf.print("!!!Warning: Last apparent power checking is not finished!!!") 
+            return False
+                        
         # Calculate apparent power before switch
         self.power_before_switch.assign(
             tf.math.reduce_mean(
@@ -550,28 +558,32 @@ class TFGuptaClassifier(keras.Model):
         event_index = tf.math.argmax(event_class, output_type=tf.int32)
         tf.print("************************************event index is",event_index,"***********************")
         if self.check_phy_condition:
-        # Calculate state vector considering physical boundary conditions          
-            if event_index < self.n_known_appliances:
-            # Known appliance is switched on 
-                appliance_index = event_index          
-                if self.check_physical_condition_switch_on(appliance_index=appliance_index):                    
-                    new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
-                        indices=[[appliance_index]],
-                        updates=[self.apparent_power_list[appliance_index]])
-                else:
-                    new_state_vector = self.current_state_vector
-			
-            elif self.n_known_appliances <= event_index < self.n_known_appliances * 2 :
-            # Known appliance is switched off
-                appliance_index = tf.math.subtract(event_index, self.n_known_appliances)
-                if self.check_physical_condition_switch_off(appliance_index=appliance_index):
-                    new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
-                        indices=[[appliance_index]],
-                        updates=[tf.constant(0, dtype=tf.float32)])
-                else:
-                    new_state_vector = self.current_state_vector
-            else:
+        # Calculate state vector considering physical boundary conditions  
+            if self.is_noise(event_index):
+                tf.print("Ignore noise")
                 new_state_vector = self.current_state_vector
+            else:             
+                if event_index < self.n_known_appliances:
+                # Known appliance is switched on 
+                    appliance_index = event_index          
+                    if self.check_physical_condition_switch_on(appliance_index=appliance_index):                    
+                        new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
+                            indices=[[appliance_index]],
+                            updates=[self.apparent_power_list[appliance_index]])
+                    else:
+                        new_state_vector = self.current_state_vector
+			
+                elif self.n_known_appliances <= event_index < self.n_known_appliances * 2 :
+                # Known appliance is switched off
+                    appliance_index = tf.math.subtract(event_index, self.n_known_appliances)
+                    if self.check_physical_condition_switch_off(appliance_index=appliance_index):
+                        new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
+                            indices=[[appliance_index]],
+                            updates=[tf.constant(0, dtype=tf.float32)])
+                    else:
+                        new_state_vector = self.current_state_vector
+                else:
+                    new_state_vector = self.current_state_vector
         else:
          # Calculate state vector without considering physical boundary conditions         
             new_state_vector = tf.case(
@@ -667,7 +679,17 @@ class TFGuptaClassifier(keras.Model):
 
         return self.current_state_vector
                                                          
-            
+    def is_noise(self, event_index: tf.Tensor):
+    
+        # After turn off power strip, the apparent power should be around 0, considering delay, set threshold to 4.
+        if event_index == 14 and self.power_window[0] > 4:
+            return True
+        
+        # Before turn on power strip, the apparent power should be around 0.   
+        if event_index == 6 and self.power_window[self.n_in_power_window - 1] > 1:
+            return True
+        return False
+                    
     def check_apparent_power_diff(self,
                                   current_apparent_power: tf.Tensor) -> None:
  
