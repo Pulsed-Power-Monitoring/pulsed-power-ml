@@ -652,8 +652,8 @@ class TFGuptaClassifier(keras.Model):
         # Check if known or unknown event via the smallest distance
         event_class = tf.cond(
             pred=tf.math.greater(tf.math.reduce_min(distances), self.distance_threshold),
-            true_fn=lambda: tf.one_hot(indices=self.n_known_appliances,
-                                       depth=tf.math.add(self.n_known_appliances, tf.constant(1, dtype=tf.int32))),
+            true_fn=lambda: tf.one_hot(indices=2*self.n_known_appliances,
+                                       depth=tf.math.add(2*self.n_known_appliances, tf.constant(1, dtype=tf.int32))),
             false_fn=lambda: event_class
         )
 
