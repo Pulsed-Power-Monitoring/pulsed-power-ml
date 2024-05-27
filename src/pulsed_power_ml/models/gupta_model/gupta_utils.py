@@ -352,29 +352,9 @@ def tf_switch_detected(res_spectrum: tf.Tensor,
     else:
         return tf.constant(False, dtype=tf.bool)
 
-def tf_switch_detected_new(res_spectrum: tf.Tensor,
-                           threshold: tf.Tensor) -> tf.Tensor:
-    """
-    Determines if mean value of res_spectrum is below / above threshold.
-
-    Parameters
-    ----------
-    res_spectrum
-        Background subtracted spectrum.
-    threshold
-        Threshold value
-
-    Returns
-    -------
-    switch_flag
-        True, if switch has been detected.
-    """
-    spectrum_mean = tf.reduce_mean(res_spectrum)
-
-    if tf.greater_equal(spectrum_mean, threshold) or tf.less_equal(spectrum_mean, (-1) * threshold):
-        return tf.constant(True, dtype=tf.bool)
-    else:
-        return tf.constant(False, dtype=tf.bool)
+def tf_max_abs_value(spectrum: tf.Tensor) -> tf.Tensor:
+    abs_spectrum = tf.abs(spectrum)
+    return tf.reduce_max(abs_spectrum)
 
 
 @tf.function

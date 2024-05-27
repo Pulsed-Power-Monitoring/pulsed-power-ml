@@ -8,6 +8,7 @@ import tensorflow as tf
 from tensorflow import keras
 
 from src.pulsed_power_ml.models.gupta_model.gupta_utils import tf_switch_detected
+from src.pulsed_power_ml.models.gupta_model.gupta_utils import tf_max_abs_value
 from src.pulsed_power_ml.models.gupta_model.gupta_utils import tf_calculate_feature_vector
 
 
@@ -132,6 +133,14 @@ class TFGuptaClassifier(keras.Model):
             trainable=False,
             name='base_spectrum'
         )
+        self.pre_max_abs_spectrum = tf.Variable(initial_value=0, 
+                                          dtype=tf.float32,
+                                          trainable=False,
+                                          name='pre_max_abs_spectrum')
+        self.valid_switch_classification = tf.Variable(initial_value=False, 
+                                          dtype=tf.bool,
+                                          trainable=False,
+                                          name='valid_switch_classification')
         # Variables for physical boundary condition                                     
         self.check_power_diff_later = tf.Variable(initial_value=False, 
                                             dtype=tf.bool,
@@ -306,7 +315,7 @@ class TFGuptaClassifier(keras.Model):
         # #+++++++++++++++++++++++# #
         raw_spectrum, apparent_power = self.crop_data_point(X)
         spectrum = 10.0 * tf.math.log(raw_spectrum) / tf.math.log(10.0) + 30.0
-
+        '''
         # #++++++++++++++++++++++++++++++++# #
         # #+++ Print out spectrum (dBm) +++# #
         # #++++++++++++++++++++++++++++++++# #
@@ -321,7 +330,7 @@ class TFGuptaClassifier(keras.Model):
             tf.print('Number of entries in window = ', self.n_frames_in_window)
             tf.print('Max window size = ', self.window_size)
             tf.print('Step size for rolling window = ', self.step_size)
-
+        '''
         if self.check_phy_condition:
             self.update_power_window(apparent_power)
             if self.check_power_diff_later:
@@ -364,62 +373,84 @@ class TFGuptaClassifier(keras.Model):
         )
 
         # Switching Event Detected?
-        switch_detected = tf_switch_detected(difference_spectrum, self.switch_threshold)
+        switch_detected = tf_switch_detected(difference_spectrum, self.switch_threshold)       
+                    
+        if switch_detected and not self.switching_flag:
+            # Switching process start
+            self.switching_flag.assign(True)
+            self.base_spectrum.assign(current_background)
+            self.pre_max_abs_spectrum.assign(tf_max_abs_value(difference_spectrum))
+                
+            # Skip step size
+            self.n_frames_in_window.assign(
+                    tf.math.subtract(
+                        x=self.n_frames_in_window,
+                        y=self.step_size
+                    )            
+            )
+            self.current_state_vector.assign(
+                    self.calculate_unknown_apparent_power(current_apparent_power=apparent_power)
+            )
+            return self.current_state_vector
         
-        if not switch_detected and not self.switching_flag:
+        if not self.switching_flag:  
             self.current_state_vector.assign(
                 self.calculate_unknown_apparent_power(current_apparent_power=apparent_power)
                 )
-            return self.current_state_vector
-                    
-        if switch_detected:
-            if not self.switching_flag:
-                # Switching process start
-                self.switching_flag.assign(True)
-                self.base_spectrum.assign(current_background)
-            
+            return self.current_state_vector  
+        
+        # During switching process
+        max_abs_spectrum = tf_max_abs_value(difference_spectrum)
+        if max_abs_spectrum >= self.pre_max_abs_spectrum:
+            # Switching...
+            self.pre_max_abs_spectrum.assign(max_abs_spectrum)
             # Skip step size
             self.n_frames_in_window.assign(
-                tf.math.subtract(
-                    x=self.n_frames_in_window,
-                    y=self.step_size
-                )            
+                    tf.math.subtract(
+                        x=self.n_frames_in_window,
+                        y=self.step_size
+                    )            
+                )
+        else:          
+            # Switching process end
+        
+            # #++++++++++++++++++++++# #
+            # #+++ Classification +++# #
+            # #++++++++++++++++++++++# #
+        
+            # Calculate cleaned spectrum for classification
+            clf_spectrum = tf.math.reduce_mean(
+                input_tensor=self.window[:self.window_size],
+                axis=0,
+                name='calculate_mean_clf_spectrum'
             )
+            
+            cleaned_clf_spectrum = tf.math.subtract(
+                x=clf_spectrum,
+                y=self.base_spectrum
+            )
+
             self.current_state_vector.assign(
-                self.calculate_unknown_apparent_power(current_apparent_power=apparent_power)
+                self.classify_switching_event(
+                    cleaned_spectrum=cleaned_clf_spectrum,
+                    current_apparent_power=apparent_power
+                )
             )
-            return self.current_state_vector
-                
-        # Switching process end
-        
-        # #++++++++++++++++++++++# #
-        # #+++ Classification +++# #
-        # #++++++++++++++++++++++# #
-        
-        # Calculate cleaned spectrum for classification
-        clf_spectrum = tf.math.reduce_mean(
-            input_tensor=self.window[:self.window_size],
-            axis=0,
-            name='calculate_mean_clf_spectrum'
-        )
-        cleaned_clf_spectrum = tf.math.subtract(
-            x=clf_spectrum,
-            y=self.base_spectrum,
-            name='calculate_cleaned_clf_spectrum'
-        )
 
-
-        self.current_state_vector.assign(
-            self.classify_switching_event(
-                cleaned_spectrum=cleaned_clf_spectrum,
-                current_apparent_power=apparent_power
-            )
-        )
-
-        # Clear switching record to take account of the new baseline
-        self.switching_flag.assign(False)
-        self.base_spectrum.assign(tf.zeros(shape=self.fft_size_real,dtype=tf.float32))
-        
+            # Clear switching record to take account of the new baseline
+            self.switching_flag.assign(False)
+            self.base_spectrum.assign(tf.zeros(shape=self.fft_size_real,dtype=tf.float32))
+            
+            if self.valid_switch_classification:
+                # Switch event classification was valid (No NaN in feature vector, known appliance), skip window size
+                self.n_frames_in_window.assign(
+                    tf.math.subtract(
+                        x=self.n_frames_in_window,
+                        y=self.window_size
+                    )            
+                )    
+                self.valid_switch_classification.assign(False)
+            
         self.current_state_vector.assign(
             self.calculate_unknown_apparent_power(current_apparent_power=apparent_power)
         )
@@ -570,6 +601,7 @@ class TFGuptaClassifier(keras.Model):
                         new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
                             indices=[[appliance_index]],
                             updates=[self.apparent_power_list[appliance_index]])
+                        self.valid_switch_classification.assign(True)
                     else:
                         new_state_vector = self.current_state_vector
 			
@@ -580,12 +612,15 @@ class TFGuptaClassifier(keras.Model):
                         new_state_vector = tf.tensor_scatter_nd_update(tensor=self.current_state_vector,
                             indices=[[appliance_index]],
                             updates=[tf.constant(0, dtype=tf.float32)])
+                        self.valid_switch_classification.assign(True)
                     else:
                         new_state_vector = self.current_state_vector
                 else:
                     new_state_vector = self.current_state_vector
         else:
-         # Calculate state vector without considering physical boundary conditions         
+         # Calculate state vector without considering physical boundary conditions 
+            if 0 <= event_index < self.n_known_appliances * 2:
+                self.valid_switch_classification.assign(True)      
             new_state_vector = tf.case(
                 pred_fn_pairs=[
                 # Case 1: Known appliance is switched on
