@@ -738,6 +738,7 @@ class TFGuptaClassifier(keras.Model):
         if self.power_before_switch != -1 and self.power_after_switch != -1:
                                      
             if self.switched_on_appliance_index != -1:
+                tf.print("************************************************Check power difference**********************************************************")
                 tf.print("*****Power after device", self.switched_on_appliance_index, "switched on:", self.power_after_switch)
                 diff_power = tf.math.subtract(self.power_after_switch, self.power_before_switch)
                 if self.is_power_diff_in_range(power_difference=diff_power, 
@@ -758,6 +759,7 @@ class TFGuptaClassifier(keras.Model):
                 self.switched_on_appliance_index.assign(-1)
                     
             if self.switched_off_appliance_index != -1:
+                tf.print("************************************************Check power difference**********************************************************")
                 tf.print("*****Power after device", self.switched_off_appliance_index, "switched off:", self.power_after_switch)
                 diff_power = tf.math.subtract(self.power_before_switch, self.power_after_switch)  
                 if self.is_power_diff_in_range(power_difference=diff_power, 
@@ -788,7 +790,7 @@ class TFGuptaClassifier(keras.Model):
         # Default interval value for check the power difference
         default_interval = tf.constant(5 * self.window_size, dtype=tf.int32)  
         if appliance_index == 0:
-            return tf.constant(10 * self.window_size, dtype=tf.int32)
+            return tf.constant(15 * self.window_size, dtype=tf.int32)
         return  default_interval
                      
     def is_power_diff_in_range(self,
