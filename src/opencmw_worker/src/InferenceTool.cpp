@@ -13,6 +13,8 @@
 
 using namespace opencmw::majordomo;
 
+NilmPredictWorker<"nilm_predict_values", description<"Nilm Predicted Data">>* nilmPredictWorkerPtr = nullptr;
+NilmWeekWorker<"nilm_week_values", description<"Nilm Week Data">>* nilmWeekWorkerPtr = nullptr;
 CMRC_DECLARE(assets);
 
 // from restserver_testapp.cpp
@@ -75,6 +77,17 @@ public:
     }
 };
 
+void signalHandler(int signum) {
+    fmt::print("Interrupt signal {} received. \n", signum);
+    if (nilmPredictWorkerPtr) {
+        nilmPredictWorkerPtr->stop();
+    }
+    if (nilmWeekWorkerPtr) {
+        nilmWeekWorkerPtr->stop();
+    } 
+           
+}
+
 int main(int argc, char *argv[]) {
     int                  opt;
     std::string          captureFilename;
@@ -136,18 +149,27 @@ int main(int argc, char *argv[]) {
     }
 
     std::jthread brokerThread([&broker] { broker.run(); });
-
+    
+    
+    
     // OpenCMW workers
     NilmPredictWorker<"nilm_predict_values", description<"Nilm Predicted Data">> nilmPredictWorker(broker, std::chrono::milliseconds(60), mode, captureFilename);
     NilmWeekWorker<"nilm_week_values", description<"Nilm Week Data">>            nilmWeekWorker(broker, std::chrono::milliseconds(1000));
-
+    
+    nilmPredictWorkerPtr = &nilmPredictWorker;
+    nilmWeekWorkerPtr = &nilmWeekWorker;
+    
+    signal(SIGINT, signalHandler);
+    
     // run workers in separate threads
     std::jthread nilmPredictWorkerThread([&nilmPredictWorker] { nilmPredictWorker.run(); });
     std::jthread nilmWeekWorkerThread([&nilmWeekWorker] { nilmWeekWorker.run(); });
-
+    
     brokerThread.join();
 
     // workers terminate when broker shuts down
     nilmPredictWorkerThread.join();
     nilmWeekWorkerThread.join();
+    
+    return 0;
 }

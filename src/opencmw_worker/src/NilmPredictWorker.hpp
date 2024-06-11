@@ -71,7 +71,7 @@ class NilmPredictWorker : public Worker<serviceName, NilmContext, Empty, NilmPre
     DataFetcher<Acquisition>         _dataFetcherAcq        = DataFetcher<Acquisition>("pulsed_power/Acquisition", "P@100Hz,Q@100Hz,S@100Hz,phi@100Hz");
     DataFetcher<AcquisitionSpectra>  _dataFetcherAcqSpectra = DataFetcher<AcquisitionSpectra>("pulsed_power_freq/AcquisitionSpectra", "S@200000Hz");
 
-    std::atomic<bool>                _shutdownRequested;
+    
     std::jthread                     _predictThread;
     std::jthread                     _fetchThread;
     NilmPredictData                  _nilmData;
@@ -86,7 +86,7 @@ class NilmPredictWorker : public Worker<serviceName, NilmContext, Empty, NilmPre
 
 public:
     using super_t = Worker<serviceName, NilmContext, Empty, NilmPredictData, Meta...>;
-
+    
     template<typename BrokerType>
     explicit NilmPredictWorker(const BrokerType &broker, std::chrono::milliseconds updateInterval, Mode mode, std::string fileName)
         : super_t(broker, {}), _mode(mode), _dataPointCapturePath(fileName) {
@@ -198,16 +198,22 @@ public:
                     fmt::print("Data prediction too slow, took {} \n", predictDuration);
                 }
             }
+            fmt::print("Exiting......\n");
+            if (_mode == Mode::Write) {
+                _dataPointFile.close();
+            }
         });
-
+        
         super_t::setCallback([this](RequestContext &rawCtx, const NilmContext &, const Empty &, NilmContext &, NilmPredictData &out) {
             if (rawCtx.request.command() == Command::Get) {
                 out = _nilmData;
             }
         });
+     
     }
-
-    ~NilmPredictWorker() {
+    
+   ~NilmPredictWorker() {
+        
         if (_mode == Mode::Write) {
             _dataPointFile.close();
         }
@@ -215,8 +221,15 @@ public:
         _predictThread.join();
         //_fetchThread.join();
     }
-
+   
+    
+    void stop() {
+        _shutdownRequested = true;
+    }
+    
 private:
+    std::atomic<bool>                _shutdownRequested;
+
     void mergeValues(const AcquisitionNilm &acqNilmData, size_t i, size_t vectorSize, std::vector<float> &output) {
         // model requires only first half of the spectrum (2^16)
         size_t fftNilmSize = vectorSize / 2;

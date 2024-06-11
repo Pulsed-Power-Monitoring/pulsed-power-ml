@@ -83,7 +83,10 @@ public:
         _shutdownRequested = true;
         _workThread.join();
     }
-
+    
+    void stop() {
+        _shutdownRequested = true;
+    }
 private:
     void processValues(const Acquisition &aq, unsigned int numValues) {
         std::unique_lock<std::mutex> lock(_mutex);
