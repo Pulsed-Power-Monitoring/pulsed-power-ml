@@ -6,7 +6,7 @@ appliances:
   - 5: L1, L2 # Laptop
   - 6: R1, R2 # Fluoreszenzroehren
   - 7: S1 # Steckdosenleiste
-  - 8: SP1 # Smartphone
+  - 8: SP1, SP2 # Smartphone
 window_size: 15
 step_size: 5
 switch_threshold: 20
@@ -20,3 +20,4 @@ sample_rate: 2_000_000
 spectrum_type: 2
 switching_offset: 1
 threshold: 30
+power_step_size: 65

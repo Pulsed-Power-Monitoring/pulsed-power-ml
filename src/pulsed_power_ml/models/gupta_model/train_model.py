@@ -95,6 +95,7 @@ def main():
         verbose=tf.constant(args.verbose, dtype=tf.bool),
         check_phy_condition=tf.constant(check_phy_condition, dtype=tf.bool),
         apparent_power_threshold=tf.constant(power_threshold, dtype=tf.float32),
+        power_step_size=parameter_dict["power_step_size"]
     )
 
     # Reset model
