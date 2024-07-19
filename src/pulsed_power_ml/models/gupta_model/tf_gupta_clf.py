@@ -60,17 +60,11 @@ class TFGuptaClassifier(keras.Model):
             Number of known appliances.
         spectrum_type
             Determines which spectrum is used. 0: voltage, 1: current, 2: apparent power
-        switching_offset
-            Number of frames to skip after a switching event has been detected before classifying the event.
-        n_peaks_max
-            Max. number of peaks, which are used to calculate features.
         apparent_power_list
             Tensor containing the apparent power per application. The order of the values is the same as
             for the labels for the KNN classifier.
         n_neighbors
             Number of nearest neighbors which should be checked during the classification.
-        knn_weights
-            How to weight the distance of al neighbors.
         distance_threshold
             If distance to the nearest neighbor is above this threshold, an event is classified as "other"
         training_data_features
@@ -79,8 +73,12 @@ class TFGuptaClassifier(keras.Model):
             Corresponding labels for the provided training data
         verbose
             If True, increase verbosity.
+        check_phy_condition
+            If True, check physical boundary condition   
         apparent_power_threshold
             Allowed apparent power range ratio of physical boundary condition. If 0, disable physical boundary condition feature
+        power_step_size
+            Number of data points between apparent power measurements
         """
         super(TFGuptaClassifier, self).__init__(name=name, **kwargs)
 
@@ -124,6 +122,7 @@ class TFGuptaClassifier(keras.Model):
                                               trainable=False,
                                               name='n_frames_in_window')
         
+        # Variables for switching detection
         self.switching_flag = tf.Variable(initial_value=False, 
                                           dtype=tf.bool,
                                           trainable=False,
@@ -132,16 +131,18 @@ class TFGuptaClassifier(keras.Model):
             initial_value=tf.zeros(shape=self.fft_size_real,dtype=tf.float32),
             dtype=tf.float32,
             trainable=False,
-            name='base_spectrum'
-        )
+            name='base_spectrum')
+            
         self.pre_max_abs_spectrum = tf.Variable(initial_value=0, 
                                           dtype=tf.float32,
                                           trainable=False,
                                           name='pre_max_abs_spectrum')
+                                          
         self.valid_switch_classification = tf.Variable(initial_value=False, 
                                           dtype=tf.bool,
                                           trainable=False,
                                           name='valid_switch_classification')
+        
         # Variables for physical boundary condition                                     
         self.check_power_diff_later = tf.Variable(initial_value=False, 
                                             dtype=tf.bool,
@@ -186,6 +187,7 @@ class TFGuptaClassifier(keras.Model):
                                           dtype=tf.bool,
                                           trainable=False,
                                           name='second_power_check')                                                  
+        
         # Apparent Power data base
         self.apparent_power_list = apparent_power_list
 
@@ -330,6 +332,8 @@ class TFGuptaClassifier(keras.Model):
             tf.print('Max window size = ', self.window_size)
             tf.print('Step size for rolling window = ', self.step_size)
         '''
+        
+        # Check power difference if needed
         if self.check_phy_condition:
             self.update_power_window(apparent_power)
             if self.check_power_diff_later:
@@ -351,7 +355,8 @@ class TFGuptaClassifier(keras.Model):
         # ++++++++++++++++++++++++++++++++++# #
         # #+++ Switching Event Detection +++# #
         # #+++++++++++++++++++++++++++++++++# #
-
+        # Get spectra before and after switching event for classification
+        
         # calculate mean background
         current_background = tf.math.reduce_mean(
             input_tensor=self.window[2 * self.window_size:],
@@ -579,9 +584,7 @@ class TFGuptaClassifier(keras.Model):
         Parameters
         ----------
         event_class
-            One-hot encoded array of length 2N+1 (N is the number of known appliances).
-        current_apparent_power
-            Current, total value of apparent power            
+            One-hot encoded array of length 2N+1 (N is the number of known appliances).           
 
         Returns
         -------
@@ -717,9 +720,22 @@ class TFGuptaClassifier(keras.Model):
         )
 
         return self.current_state_vector
-                                                         
-    def is_noise(self, event_index: tf.Tensor):        
-        # Before turn on power strip, the apparent power should be around 0.   
+        
+    def is_noise(self, event_index: tf.Tensor):
+        """
+        Check if detected switching event is noise
+
+        Parameters
+        ----------
+        Event index
+            Index of switching event
+
+        Returns
+        -------
+        True or False
+        """            
+        # Before turn on power strip, the apparent power should be around 0. 
+        # Warning: the logic is hard-coded, if appliance list changes, adjust the code  
         if event_index == 6 and self.power_window[self.n_in_power_window - 1] > 1:
             return True
         return False
@@ -796,7 +812,8 @@ class TFGuptaClassifier(keras.Model):
             self.current_state_vector.assign(
                         self.calculate_unknown_apparent_power(current_apparent_power=current_apparent_power)
             ) 
-                                                                                                                                         
+        
+        # Apparent power difference check finished, clear variables                                                                                           
         if check_finish:
             self.second_power_check.assign(False)
             self.power_before_switch.assign(-1) 
@@ -810,7 +827,20 @@ class TFGuptaClassifier(keras.Model):
     def is_power_diff_in_range(self,
                                power_difference:tf.Tensor, 
                                appliance_index:tf.Tensor):
-                                    
+        """
+        Check if power difference in given allowed range
+
+        Parameters
+        ----------
+        power_difference
+            difference of apparent power
+        appliance_index
+            Index of known appliance            
+
+        Returns
+        -------
+        True of False
+        """                                     
         # Check if the power difference is in allowed range
         appliance_power = self.apparent_power_list[appliance_index]
         power_threshold = appliance_power * self.apparent_power_threshold            
@@ -823,7 +853,20 @@ class TFGuptaClassifier(keras.Model):
     def is_power_diff_in_tolerance_range(self,
                                power_difference:tf.Tensor, 
                                appliance_index:tf.Tensor):
-                                    
+        """
+        Check if power difference in tolerance range
+
+        Parameters
+        ----------
+        power_difference
+            difference of apparent power
+        appliance_index
+            Index of known appliance            
+
+        Returns
+        -------
+        True of False
+        """                                     
         # Check if the power difference is in allowed range
         appliance_power = self.apparent_power_list[appliance_index]
         power_threshold = appliance_power * self.apparent_power_threshold            
@@ -836,6 +879,14 @@ class TFGuptaClassifier(keras.Model):
         return True
                              
     def update_power_window(self, apparent_power) -> None:
+        """
+        Function to add apparent power to power window and, if necessary, increase frames counter.
+
+        Parameters
+        ----------
+        apparent_power
+            apparent power
+        """    
         if self.check_phy_condition:
             self.power_window.assign(
                 tf.tensor_scatter_nd_update(tensor=tf.roll(self.power_window, shift=1, axis=0),

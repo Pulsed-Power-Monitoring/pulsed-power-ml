@@ -1,3 +1,6 @@
+'''
+ Script to make training data from raw data
+'''
 import argparse
 import sys
 
@@ -76,10 +79,14 @@ def main():
 
     # Produce plots
     fig = plt.figure(figsize=(16, 18), tight_layout=True)
+    
+    # Plot apparent power and switch positions
     ax = fig.add_subplot(3, 1, 1)
+    # Plot apparent power
     apparent_power_array = data_point_array[:, -2]
     ax.plot(apparent_power_array,
             label='Apparent Power')
+    # Plot switch position
     ax.plot(switch_positions * max(apparent_power_array),
             label='Detected Switching Events',
             alpha=0.5)
@@ -88,9 +95,11 @@ def main():
     ax.grid(True)
     ax.legend()
     ax.set_title(f'Apparent Power & Switch Positions for {args.prefix}')
+    # Plot switch position (feature vector has NaN element)
     if NaN_array.size != 0:
         ax.vlines(NaN_array, ymin=0, ymax=0.5 * max(apparent_power_array), color='red')
-
+    
+    # Plot maximal value of spectrum
     ax_max_spec = fig.add_subplot(3, 1, 2)
     ax_max_spec.plot(max_spec_array,
             label='Max spectrum')
@@ -99,7 +108,8 @@ def main():
     ax_max_spec.grid(True)
     ax_max_spec.legend()
     ax_max_spec.set_title(f'Max spectrum for {args.prefix}')
-        
+    
+    # Plot switch value for switch detection    
     ax_switch_values = fig.add_subplot(3, 1, 3)
     ax_switch_values.plot(
         switch_value_array,

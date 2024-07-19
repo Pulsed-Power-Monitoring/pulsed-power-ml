@@ -104,6 +104,7 @@ def get_features_from_raw_data(data_point_array: np.array,
         # switch detected
         if np.abs(switch_value) >= switch_detection_threshold:
             if switch_start == None:
+                # Get data of start point of switching process
                 switch_start = i - (2 * window_size)
                 baseline_spectrum = mean_background
                 pre_switch_value = np.abs(switch_value)
@@ -135,7 +136,8 @@ def get_features_from_raw_data(data_point_array: np.array,
                     sample_rate=tf.constant(sample_rate, dtype=tf.int32))\
                     .numpy()\
                     .reshape((-1))
-            
+                    
+                # Check if there is NaN in feature vector
                 if np.isnan(feature_vector).any() == False:
                     feature_list.append(feature_vector) 
                     for j in range(window_size):
@@ -152,7 +154,7 @@ def get_features_from_raw_data(data_point_array: np.array,
                 baseline_spectrum = None
                 pre_switch_value = 0
             else:
-                
+                # Switching, skip step size
                 for j in range(step_size):
                     _ = window.popleft()
                     
@@ -197,6 +199,21 @@ def remove_false_positive_switching_events(feature_vector_array: np.array,
     return corrected_feature_vector_array, corrected_switch_positions
 
 def get_max_spectrum(data_point_array: np.array, parameter_dict: dict) -> np.array:
+    """
+    Function to get maximum value of spectrum.
+
+    Parameters
+    ----------
+    data_point_array
+        Array of data points (fft_u, fft_i, fft_s, p, q, s, phi)
+    parameter_dict
+        Parameter dictionary
+    
+    Returns
+    -------
+    spectrum_array
+        array contains maximum spectrum
+    """
     # Get parameters from parameter dict
     fft_size_real = int(parameter_dict['fft_size_real'])
     spectrum_type = int(parameter_dict['spectrum_type'])

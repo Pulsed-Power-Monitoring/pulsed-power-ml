@@ -1,3 +1,9 @@
+'''
+Script for helping to get feature vector of noise, only apply for this scenario:
+1. With default switch threshold, there are many switch events which is wrongly recognized.
+2. When increase switch threshold, the number of switching positions is enormly decreased, correct switch events are easy to be recognized.
+For other scenario, please use manual identification 
+'''
 import argparse
 import numpy as np
 
@@ -56,11 +62,13 @@ def main():
                 removed_index.append(position)
     switch_features = features[removed_index, :]
     noise_features = np.delete(features, removed_index, axis=0)
+    
     switch_feature_file_name = f'{args.output_folder}/{args.prefix}_switch_features.csv'
     print('Write switch features in',switch_feature_file_name)
     np.savetxt(fname=switch_feature_file_name,
                X=switch_features,
                delimiter=',')    
+    
     noise_feature_file_name = f'{args.output_folder}/{args.prefix}_noise_features.csv'
     print('Write noise features in',noise_feature_file_name)
     np.savetxt(fname=noise_feature_file_name,

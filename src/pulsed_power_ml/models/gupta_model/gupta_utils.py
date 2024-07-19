@@ -353,6 +353,18 @@ def tf_switch_detected(res_spectrum: tf.Tensor,
         return tf.constant(False, dtype=tf.bool)
 
 def tf_max_abs_value(spectrum: tf.Tensor) -> tf.Tensor:
+    """
+    Calculate the maximum of absolute values of given spectrum.
+
+    Parameters
+    ----------
+    spectrum
+        Spectrum 
+
+    Returns
+    -------
+    Maximum value of absolute value of input tensor
+    """
     abs_spectrum = tf.abs(spectrum)
     return tf.reduce_max(abs_spectrum)
 
